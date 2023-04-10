@@ -1,6 +1,7 @@
 package main
 
 import (
+	"broker/event"
 	"bytes"
 	"encoding/json"
 	"errors"
@@ -53,11 +54,12 @@ func (app *Config) HandleSubmission(w http.ResponseWriter, r *http.Request) {
 	case "auth":
 		app.authenticate(w, requestPaylod.Auth)
 	case "log":
-		app.logItem(w, requestPaylod.Log)
+		app.logEventViaRabbit(w, requestPaylod.Log)
+		// app.logItem(w, requestPaylod.Log)
 	case "mail":
 		app.sendMail(w, requestPaylod.Mail)
 	default:
-		app.errorJSON(w, errors.New("Unknown action"))
+		app.errorJSON(w, errors.New("unknown action"))
 
 	}
 }
@@ -114,10 +116,10 @@ func (app *Config) authenticate(w http.ResponseWriter, a AuthPaylod) {
 	defer response.Body.Close()
 
 	if response.StatusCode == http.StatusUnauthorized {
-		app.errorJSON(w, errors.New("Invalid credentails"))
+		app.errorJSON(w, errors.New("invalid credentails"))
 		return
 	} else if response.StatusCode != http.StatusAccepted {
-		app.errorJSON(w, errors.New("Error calling auth service"))
+		app.errorJSON(w, errors.New("error calling auth service"))
 		return
 	}
 
@@ -173,4 +175,38 @@ func (app *Config) sendMail(w http.ResponseWriter, msg MailPayload) {
 	payload.Message = "Message sent to " + msg.To
 
 	app.writeJSON(w, http.StatusAccepted, payload)
+}
+
+func (app *Config) logEventViaRabbit(w http.ResponseWriter, l LogPayload) {
+	err := app.pushToQueue(l.Name, l.Data)
+	if err != nil {
+		app.errorJSON(w, err)
+		return
+	}
+
+	var payload jsonResponse
+	payload.Error = false
+	payload.Message = "logged via RabbitMQ"
+
+	app.writeJSON(w, http.StatusAccepted, payload)
+}
+
+func (app *Config) pushToQueue(name, msg string) error {
+	emitter, err := event.NewEventEmitter(app.Rabbit)
+	if err != nil {
+		return err
+	}
+
+	payload := LogPayload{
+		Name: name,
+		Data: msg,
+	}
+
+	j, _ := json.MarshalIndent(&payload, "", "\t")
+	err = emitter.Push(string(j), "log.INFO")
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
