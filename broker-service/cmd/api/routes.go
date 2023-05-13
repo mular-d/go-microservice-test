@@ -11,7 +11,7 @@ import (
 func (app *Config) routes() http.Handler {
 	mux := chi.NewRouter()
 
-	//specify who is allowed to connect
+	// specify who is allowed to connect
 	mux.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   []string{"https://*", "http://*"},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "PUT"},
@@ -24,6 +24,7 @@ func (app *Config) routes() http.Handler {
 	mux.Use(middleware.Heartbeat("/ping"))
 
 	mux.Post("/", app.Broker)
+	mux.Post("/log-grpc", app.LogViaGRPC)
 
 	mux.Post("/handle", app.HandleSubmission)
 
