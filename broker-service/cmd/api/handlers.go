@@ -1,11 +1,13 @@
 package main
 
 import (
-	"broker/event"
 	"bytes"
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/rpc"
+
+	"broker/event"
 )
 
 type RequestPaylod struct {
@@ -54,7 +56,8 @@ func (app *Config) HandleSubmission(w http.ResponseWriter, r *http.Request) {
 	case "auth":
 		app.authenticate(w, requestPaylod.Auth)
 	case "log":
-		app.logEventViaRabbit(w, requestPaylod.Log)
+		app.logItemViaRPC(w, requestPaylod.Log)
+		// app.logEventViaRabbit(w, requestPaylod.Log)
 		// app.logItem(w, requestPaylod.Log)
 	case "mail":
 		app.sendMail(w, requestPaylod.Mail)
@@ -79,7 +82,6 @@ func (app *Config) logItem(w http.ResponseWriter, entry LogPayload) {
 
 	client := &http.Client{}
 	response, err := client.Do(request)
-
 	if err != nil {
 		app.errorJSON(w, err)
 		return
@@ -101,7 +103,11 @@ func (app *Config) logItem(w http.ResponseWriter, entry LogPayload) {
 func (app *Config) authenticate(w http.ResponseWriter, a AuthPaylod) {
 	jsonData, _ := json.MarshalIndent(a, "", "\t")
 
-	request, err := http.NewRequest("POST", "http://authentication-service/authenticate", bytes.NewBuffer(jsonData))
+	request, err := http.NewRequest(
+		"POST",
+		"http://authentication-service/authenticate",
+		bytes.NewBuffer(jsonData),
+	)
 	if err != nil {
 		app.errorJSON(w, err)
 		return
@@ -209,4 +215,37 @@ func (app *Config) pushToQueue(name, msg string) error {
 	}
 
 	return nil
+}
+
+type RPCPayload struct {
+	Name string
+	Data string
+}
+
+func (app *Config) logItemViaRPC(w http.ResponseWriter, l LogPayload) {
+	client, err := rpc.Dial("tcp", "logger-service:5001")
+	if err != nil {
+		app.errorJSON(w, err)
+		return
+	}
+
+	rpcPayload := RPCPayload{
+		Name: l.Name,
+		Data: l.Data,
+	}
+
+	var result string
+	err = client.Call("RPCServer.LogInfo", rpcPayload, &result)
+
+	if err != nil {
+		app.errorJSON(w, err)
+		return
+	}
+
+	payload := jsonResponse{
+		Error:   false,
+		Message: result,
+	}
+
+	app.writeJSON(w, http.StatusAccepted, payload)
 }
